@@ -1,10 +1,8 @@
--- ╔══════════════════════════════════════════════════════════╗
--- ║              🍕  PIZZA HUB  🍕                           ║
--- ║      Wallhack · Aimbot · Triggerbot · GUI Moderna        ║
--- ║      Otimizado para máxima performance / mínimo FPS loss ║
--- ╚══════════════════════════════════════════════════════════╝
--- Cole no executor (Synapse X, KRNL, Fluxus, Delta...)
--- F1 = abrir/fechar hub | F2 = toggle aimbot rápido
+-- ╔══════════════════════════════════════════╗
+-- ║         🍕 PIZZA HUB v3.0               ║
+-- ║  Wallhack · Aimbot · Triggerbot          ║
+-- ║  F1 = abrir/fechar                       ║
+-- ╚══════════════════════════════════════════╝
 
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
@@ -14,982 +12,612 @@ local TweenService     = game:GetService("TweenService")
 local LP     = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- ══════════════════════════════════════════════════════════════
---  CONFIG CENTRAL  (edite aqui)
--- ══════════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════
+--  CONFIGURAÇÕES
+-- ══════════════════════════════════════════
 local CFG = {
-    -- Wallhack
-    WH_Enabled       = true,
-    WH_EnemyColor    = Color3.fromRGB(255, 60,  60),
-    WH_AllyColor     = Color3.fromRGB(60,  220, 100),
-    WH_FillTrans     = 0.5,
-    WH_OutlineTrans  = 0.0,
+    WH_On         = true,
+    WH_EnemyColor = Color3.fromRGB(255, 60, 60),
+    WH_AllyColor  = Color3.fromRGB(60, 220, 100),
 
-    -- Aimbot
-    AB_Enabled       = true,
-    AB_Key           = Enum.KeyCode.LeftShift,
-    AB_FOV           = 120,          -- graus (dot product)
-    AB_Stiffness     = 14,           -- spring rigidez
-    AB_Damping       = 6,            -- spring amortecimento
-    AB_Predict       = 0.10,         -- segundos de predição
-    AB_AimPart       = "Head",       -- "Head" | "HumanoidRootPart"
-    AB_ShowFOV       = true,
-    AB_TeamCheck     = true,
-    AB_HealthCheck   = true,
-    AB_VisCheck      = true,
+    AB_On         = true,
+    AB_Smooth     = 0.3,   -- 0 = instantâneo, 1 = muito lento
+    AB_FOV        = 150,   -- pixels do centro da tela
+    AB_Part       = "Head",
+    AB_TeamCheck  = true,
+    AB_HealthCheck= true,
 
-    -- Triggerbot
-    TB_Enabled       = false,
-    TB_Threshold     = 18,           -- pixels do centro
-    TB_Delay         = 0.10,         -- segundos entre tiros
-    TB_TeamCheck     = true,
-
-    -- GUI
-    GUI_AccentA      = Color3.fromRGB(255, 140,  0),   -- laranja pizza
-    GUI_AccentB      = Color3.fromRGB(220,  40, 40),   -- vermelho pizza
-    GUI_BG           = Color3.fromRGB(10,   10, 14),
-    GUI_Card         = Color3.fromRGB(18,   18, 25),
-    GUI_Panel        = Color3.fromRGB(24,   24, 34),
-    GUI_Text         = Color3.fromRGB(230, 230, 240),
-    GUI_Sub          = Color3.fromRGB(130, 130, 150),
-    GUI_Toggle       = Color3.fromRGB(30,   30, 46),
-    GUI_Green        = Color3.fromRGB(60,  220, 100),
-    GUI_Red          = Color3.fromRGB(255,  60,  60),
+    TB_On         = false,
+    TB_Px         = 20,    -- pixels do centro pra atirar
+    TB_Delay      = 0.12,
 }
 
--- ══════════════════════════════════════════════════════════════
---  HELPERS / PERF
--- ══════════════════════════════════════════════════════════════
-local V2   = Vector2.new
-local V3   = Vector3.new
-local CF   = CFrame.new
-local cos  = math.cos
-local rad  = math.rad
-local huge = math.huge
-local floor= math.floor
-local clamp= math.clamp
+-- ══════════════════════════════════════════
+--  WALLHACK  (Highlight nativo)
+-- ══════════════════════════════════════════
+local highlights = {}   -- [player] = Highlight instance
 
--- Cache de personagens (evita GetPlayers() a cada frame)
-local charCache   = {}     -- [player] = {char, root, head, hum, vel, highlight}
-local CACHE_DIRTY = true
-
-local function RebuildCache()
-    for p, data in pairs(charCache) do
-        if not data.char or not data.char.Parent then
-            charCache[p] = nil
-        end
+local function AddHighlight(p)
+    if p == LP then return end
+    -- remove antigo se existir
+    if highlights[p] then
+        highlights[p]:Destroy()
+        highlights[p] = nil
     end
+    local char = p.Character
+    if not char then return end
+
+    local hl = Instance.new("Highlight")
+    hl.Adornee            = char
+    hl.DepthMode          = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.FillTransparency   = 0.5
+    hl.OutlineTransparency= 0
+    hl.Enabled            = CFG.WH_On
+
+    local isEnemy = CFG.AB_TeamCheck and (p.Team ~= LP.Team)
+    hl.FillColor    = isEnemy and CFG.WH_EnemyColor or CFG.WH_AllyColor
+    hl.OutlineColor = isEnemy and CFG.WH_EnemyColor or CFG.WH_AllyColor
+
+    hl.Parent      = char
+    highlights[p]  = hl
+end
+
+local function RemoveHighlight(p)
+    if highlights[p] then
+        highlights[p]:Destroy()
+        highlights[p] = nil
+    end
+end
+
+local function RefreshAllHighlights()
+    for p, hl in pairs(highlights) do
+        hl.Enabled = CFG.WH_On
+        local isEnemy = CFG.AB_TeamCheck and (p.Team ~= LP.Team)
+        hl.FillColor    = isEnemy and CFG.WH_EnemyColor or CFG.WH_AllyColor
+        hl.OutlineColor = isEnemy and CFG.WH_EnemyColor or CFG.WH_AllyColor
+    end
+end
+
+-- liga highlight em todos que já estão no jogo
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LP then
+        AddHighlight(p)
+        p.CharacterAdded:Connect(function()
+            task.wait(0.5)
+            AddHighlight(p)
+        end)
+    end
+end
+
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function()
+        task.wait(0.5)
+        AddHighlight(p)
+    end)
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    RemoveHighlight(p)
+end)
+
+-- ══════════════════════════════════════════
+--  AIMBOT
+-- ══════════════════════════════════════════
+local aiming    = false
+local tbTimer   = 0
+
+local function GetTarget()
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local best, bestDist = nil, CFG.AB_FOV
+
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP then
-            local c  = p.Character
-            local r  = c and c:FindFirstChild("HumanoidRootPart")
-            local h  = c and c:FindFirstChild("Head")
-            local hm = c and c:FindFirstChildOfClass("Humanoid")
-            if c and r and h and hm then
-                charCache[p] = charCache[p] or {}
-                local d = charCache[p]
-                d.char = c; d.root = r; d.head = h; d.hum = hm
-                d.vel  = r.AssemblyLinearVelocity     -- atualizado barato
-                d.player = p
-            end
-        end
-    end
-    CACHE_DIRTY = false
-end
+        if p == LP then continue end
+        if CFG.AB_TeamCheck and p.Team == LP.Team then continue end
+        local char = p.Character
+        if not char then continue end
+        local hum  = char:FindFirstChildOfClass("Humanoid")
+        if CFG.AB_HealthCheck and (not hum or hum.Health <= 0) then continue end
+        local part = char:FindFirstChild(CFG.AB_Part) or char:FindFirstChild("HumanoidRootPart")
+        if not part then continue end
 
-local function IsEnemy(p)
-    if not CFG.AB_TeamCheck then return true end
-    return p.Team ~= LP.Team
-end
+        local sp, onScreen = Camera:WorldToViewportPoint(part.Position)
+        if not onScreen or sp.Z <= 0 then continue end
 
-local function IsAlive(data)
-    return data.hum and data.hum.Health > 0
-end
-
--- Converte ângulo FOV (graus) em dot-product mínimo
-local function FOVtoDot(fov)
-    return cos(rad(fov * 0.5))
-end
-
--- Direção câmera → alvo normalizada
-local function DirTo(worldPos)
-    return (worldPos - Camera.CFrame.Position).Unit
-end
-
--- Checa se posição está dentro do FOV configurado
-local function InFOV(worldPos, minDot)
-    local look = Camera.CFrame.LookVector
-    local dir  = DirTo(worldPos)
-    return look:Dot(dir) >= minDot
-end
-
--- Screen center
-local function ScreenCenter()
-    local vp = Camera.ViewportSize
-    return V2(vp.X * 0.5, vp.Y * 0.5)
-end
-
--- WorldToViewport seguro (retorna nil se atrás da câmera)
-local function W2V(pos)
-    local sp, vis = Camera:WorldToViewportPoint(pos)
-    if sp.Z > 0 then return V2(sp.X, sp.Y), vis end
-    return nil, false
-end
-
--- ══════════════════════════════════════════════════════════════
---  WALLHACK  (Highlight nativo — zero Drawing, zero FPS loss)
--- ══════════════════════════════════════════════════════════════
-local function ApplyHighlight(data)
-    local p = data.player
-    local isEnemy = IsEnemy(p)
-    local hl = data.char:FindFirstChildOfClass("SelectionHighlight")
-           or  data.highlight
-
-    if not hl or not hl.Parent then
-        hl = Instance.new("SelectionHighlight")
-        hl.Name      = "PizzaESP"
-        hl.Adornee   = data.char
-        hl.Parent    = data.char
-        data.highlight = hl
-    end
-
-    hl.Enabled           = CFG.WH_Enabled
-    hl.FillColor         = isEnemy and CFG.WH_EnemyColor or CFG.WH_AllyColor
-    hl.OutlineColor      = isEnemy and CFG.WH_EnemyColor or CFG.WH_AllyColor
-    hl.FillTransparency  = CFG.WH_FillTrans
-    hl.OutlineTransparency = CFG.WH_OutlineTrans
-    hl.DepthMode         = Enum.HighlightDepthMode.AlwaysOnTop
-end
-
-local function RemoveHighlight(data)
-    if data and data.highlight then
-        pcall(function() data.highlight:Destroy() end)
-        data.highlight = nil
-    end
-end
-
-local function RefreshHighlights()
-    for _, data in pairs(charCache) do
-        if data.char then
-            if CFG.WH_Enabled then
-                ApplyHighlight(data)
-            else
-                if data.highlight then
-                    data.highlight.Enabled = false
-                end
-            end
-        end
-    end
-end
-
--- ══════════════════════════════════════════════════════════════
---  AIMBOT  (spring-damper + predição)
--- ══════════════════════════════════════════════════════════════
--- Estado do spring (velocidade angular acumulada)
-local springVel = V3(0, 0, 0)
-
-local lockedTarget = nil   -- data entry ou nil
-local lockedLabel  = nil   -- atualizado pelo GUI
-
-local function GetAimPart(data)
-    return CFG.AB_AimPart == "Head" and data.head or data.root
-end
-
-local function GetBestTarget()
-    if not CFG.AB_Enabled then return nil end
-    local minDot   = FOVtoDot(CFG.AB_FOV)
-    local best     = nil
-    local bestDot  = -huge
-
-    for p, data in pairs(charCache) do
-        if IsEnemy(p) then
-            if not (CFG.AB_HealthCheck and not IsAlive(data)) then
-                local part = GetAimPart(data)
-                if part then
-                    local pred = part.Position + (data.vel * CFG.AB_Predict)
-                    if CFG.AB_VisCheck then
-                        local sp, vis = W2V(pred)
-                        if not (sp and vis) then continue end
-                    end
-                    local dir  = DirTo(pred)
-                    local look = Camera.CFrame.LookVector
-                    local dot  = look:Dot(dir)
-                    if dot >= minDot and dot > bestDot then
-                        bestDot = dot
-                        best    = data
-                    end
-                end
-            end
+        local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+        if d < bestDist then
+            bestDist = d
+            best     = part
         end
     end
     return best
 end
 
--- Aplica spring-damper na direção da câmera (sem teleportar)
-local function SpringStep(dt, data)
-    local part = GetAimPart(data)
+local function AimbotStep()
+    if not CFG.AB_On or not aiming then return end
+    local part = GetTarget()
     if not part then return end
 
-    local pred     = part.Position + (data.vel * CFG.AB_Predict)
-    local wantDir  = DirTo(pred)
-    local curDir   = Camera.CFrame.LookVector
-
-    -- Erro angular como vetor 3D
-    local err      = wantDir - curDir
-
-    -- Integração spring (semi-implícita Euler)
-    local k        = CFG.AB_Stiffness
-    local d        = CFG.AB_Damping
-    local acc      = err * k - springVel * d
-    springVel      = springVel + acc * dt
-    local newDir   = (curDir + springVel * dt).Unit
-
-    local camPos   = Camera.CFrame.Position
-    Camera.CFrame  = CFrame.lookAt(camPos, camPos + newDir, V3(0, 1, 0))
+    local pos  = part.Position
+    local cf   = Camera.CFrame
+    local goal = CFrame.lookAt(cf.Position, pos)
+    Camera.CFrame = cf:Lerp(goal, 1 - CFG.AB_Smooth)
 end
 
--- ══════════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════
 --  TRIGGERBOT
--- ══════════════════════════════════════════════════════════════
-local tbCooldown = 0
+-- ══════════════════════════════════════════
+local function TriggerbotStep(dt)
+    if not CFG.TB_On then return end
+    tbTimer = tbTimer - dt
+    if tbTimer > 0 then return end
 
-local function TriggerTick(dt)
-    tbCooldown = tbCooldown - dt
-    if not CFG.TB_Enabled or tbCooldown > 0 then return end
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LP then continue end
+        if CFG.TB_TeamCheck and p.Team == LP.Team then continue end
+        local char = p.Character
+        if not char then continue end
+        local hum  = char:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then continue end
+        local head = char:FindFirstChild("Head")
+        if not head then continue end
 
-    local center = ScreenCenter()
-    for p, data in pairs(charCache) do
-        if not (CFG.TB_TeamCheck and not IsEnemy(p)) then
-            if IsAlive(data) then
-                local sp, vis = W2V(data.head.Position)
-                if sp and vis then
-                    local dist = (sp - center).Magnitude
-                    if dist <= CFG.TB_Threshold then
-                        -- Simula clique (mouse1click via VirtualUser)
-                        local vus = game:GetService("VirtualUser")
-                        vus:Button1Down(center, Camera.CFrame)
-                        task.delay(0.06, function()
-                            vus:Button1Up(center, Camera.CFrame)
-                        end)
-                        tbCooldown = CFG.TB_Delay
-                        break
-                    end
-                end
-            end
+        local sp, on = Camera:WorldToViewportPoint(head.Position)
+        if not on or sp.Z <= 0 then continue end
+        if (Vector2.new(sp.X, sp.Y) - center).Magnitude <= CFG.TB_Px then
+            -- simula clique
+            local v = game:GetService("VirtualUser")
+            v:Button1Down(center, Camera.CFrame)
+            task.delay(0.05, function() v:Button1Up(center, Camera.CFrame) end)
+            tbTimer = CFG.TB_Delay
+            break
         end
     end
 end
 
--- ══════════════════════════════════════════════════════════════
---  FOV CIRCLE  (Drawing — só recria quando muda)
--- ══════════════════════════════════════════════════════════════
-local fovCircle = Drawing.new("Circle")
-fovCircle.Visible   = false
-fovCircle.Color     = CFG.GUI_AccentA
-fovCircle.Thickness = 1
-fovCircle.NumSides  = 64
-fovCircle.Filled    = false
-fovCircle.ZIndex    = 10
+-- ══════════════════════════════════════════
+--  CIRCLE FOV (Drawing)
+-- ══════════════════════════════════════════
+local fovCircle      = Drawing.new("Circle")
+fovCircle.Color      = Color3.fromRGB(255, 140, 0)
+fovCircle.Thickness  = 1.5
+fovCircle.NumSides   = 60
+fovCircle.Filled     = false
+fovCircle.ZIndex     = 5
+fovCircle.Visible    = false
 
-local fovLastR = 0
-local function UpdateFOVCircle()
-    local show = CFG.AB_Enabled and CFG.AB_ShowFOV
-    fovCircle.Visible = show
-    if show then
-        local vp = Camera.ViewportSize
-        fovCircle.Position = V2(vp.X * 0.5, vp.Y * 0.5)
-        -- Converte FOV de graus para raio em pixels (aproximação)
-        local r = floor(vp.Y * CFG.AB_FOV / Camera.FieldOfView)
-        if r ~= fovLastR then
-            fovCircle.Radius = r
-            fovLastR = r
-        end
-    end
-end
-
--- Indicador de alvo travado
-local lockLine = Drawing.new("Line")
-lockLine.Visible   = false
-lockLine.Color     = CFG.GUI_AccentA
-lockLine.Thickness = 1.5
-lockLine.ZIndex    = 11
-
-local function UpdateLockIndicator(data)
-    if not data then
-        lockLine.Visible = false
-        return
-    end
-    local part = GetAimPart(data)
-    if not part then lockLine.Visible = false; return end
-    local sp, vis = W2V(part.Position)
-    if sp and vis then
-        local center = ScreenCenter()
-        lockLine.Visible = true
-        lockLine.From    = center
-        lockLine.To      = sp
-    else
-        lockLine.Visible = false
-    end
-end
-
--- ══════════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════
 --  GUI — PIZZA HUB
--- ══════════════════════════════════════════════════════════════
-local SG = Instance.new("ScreenGui")
-SG.Name              = "PizzaHub"
-SG.ResetOnSpawn      = false
-SG.ZIndexBehavior    = Enum.ZIndexBehavior.Sibling
-SG.IgnoreGuiInset    = true
-SG.Parent            = game:GetService("CoreGui")
+-- ══════════════════════════════════════════
+-- Remove gui antiga se existir
+pcall(function()
+    game:GetService("CoreGui"):FindFirstChild("PizzaHub"):Destroy()
+end)
 
-local function New(cls, props, parent)
-    local i = Instance.new(cls)
-    for k, v in pairs(props) do i[k] = v end
+local SG = Instance.new("ScreenGui")
+SG.Name           = "PizzaHub"
+SG.ResetOnSpawn   = false
+SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+SG.IgnoreGuiInset = true
+SG.Parent         = game:GetService("CoreGui")
+
+-- Cores
+local A1  = Color3.fromRGB(255, 140, 0)   -- laranja
+local A2  = Color3.fromRGB(220, 40,  40)  -- vermelho
+local BG  = Color3.fromRGB(10,  10,  15)
+local CAR = Color3.fromRGB(20,  20,  30)
+local TXT = Color3.fromRGB(230, 230, 240)
+local SUB = Color3.fromRGB(130, 130, 155)
+local TOG = Color3.fromRGB(35,  35,  50)
+local GRN = Color3.fromRGB(60,  220, 100)
+local TI  = TweenInfo.new(0.18, Enum.EasingStyle.Quad)
+
+-- Atalho rápido para criar instâncias
+local function N(c, props, parent)
+    local i = Instance.new(c)
+    for k,v in pairs(props) do i[k]=v end
     if parent then i.Parent = parent end
     return i
 end
 
-local function Corner(r, p) return New("UICorner", {CornerRadius = UDim.new(0, r)}, p) end
-local function Stroke(c, t, p) return New("UIStroke", {Color=c, Thickness=t}, p) end
-local function Pad(l, r, t, b, p)
-    return New("UIPadding",{PaddingLeft=UDim.new(0,l),PaddingRight=UDim.new(0,r),
-                             PaddingTop=UDim.new(0,t),PaddingBottom=UDim.new(0,b)}, p)
-end
-local function List(pad, p)
-    return New("UIListLayout",{Padding=UDim.new(0,pad),SortOrder=Enum.SortOrder.LayoutOrder}, p)
-end
-
--- Frame principal
-local Main = New("Frame", {
-    Size             = UDim2.new(0, 370, 0, 500),
-    Position         = UDim2.new(0, 50, 0, 50),
-    BackgroundColor3 = CFG.GUI_BG,
+-- ── Frame principal ──
+local Main = N("Frame", {
+    Size             = UDim2.new(0, 340, 0, 420),
+    Position         = UDim2.new(0, 60, 0, 60),
+    BackgroundColor3 = BG,
     BorderSizePixel  = 0,
     Active           = true,
     Draggable        = true,
     ClipsDescendants = true,
 }, SG)
-Corner(14, Main)
-Stroke(CFG.GUI_AccentA, 1.2, Main)
+N("UICorner", {CornerRadius = UDim.new(0, 12)}, Main)
+N("UIStroke", {Color = A1, Thickness = 1.2, Transparency = 0.3}, Main)
 
--- Barra de gradiente topo
-local TopBar = New("Frame", {
+-- Barra topo colorida
+local topBar = N("Frame", {
     Size             = UDim2.new(1, 0, 0, 4),
-    BackgroundColor3 = CFG.GUI_AccentA,
+    BackgroundColor3 = A1,
     BorderSizePixel  = 0,
-    ZIndex           = 5,
 }, Main)
-Corner(14, TopBar)
-New("UIGradient", {
-    Color    = ColorSequence.new(CFG.GUI_AccentA, CFG.GUI_AccentB),
-    Rotation = 0,
-}, TopBar)
+N("UICorner", {CornerRadius = UDim.new(0, 12)}, topBar)
+N("UIGradient", {Color = ColorSequence.new(A1, A2), Rotation = 0}, topBar)
 
--- Header
-local Header = New("Frame", {
-    Size             = UDim2.new(1, 0, 0, 56),
-    Position         = UDim2.new(0, 0, 0, 4),
+-- Título
+N("TextLabel", {
+    Size             = UDim2.new(1, -16, 0, 44),
+    Position         = UDim2.new(0, 14, 0, 6),
     BackgroundTransparency = 1,
-}, Main)
-
-New("TextLabel", {
-    Size             = UDim2.new(0, 180, 1, 0),
-    Position         = UDim2.new(0, 14, 0, 0),
-    BackgroundTransparency = 1,
-    Text             = "🍕 PIZZA HUB",
-    TextColor3       = CFG.GUI_Text,
+    Text             = "🍕  PIZZA HUB",
+    TextColor3       = TXT,
     Font             = Enum.Font.GothamBold,
-    TextSize         = 18,
+    TextSize         = 17,
     TextXAlignment   = Enum.TextXAlignment.Left,
-}, Header)
+}, Main)
 
-New("TextLabel", {
-    Size             = UDim2.new(0, 160, 0, 16),
-    Position         = UDim2.new(0, 14, 1, -18),
+N("TextLabel", {
+    Size             = UDim2.new(1, -16, 0, 16),
+    Position         = UDim2.new(0, 14, 0, 42),
     BackgroundTransparency = 1,
-    Text             = "v2.0 · F1 fechar · F2 aimbot",
-    TextColor3       = CFG.GUI_Sub,
+    Text             = "F1 fechar  ·  SHIFT mirar",
+    TextColor3       = SUB,
     Font             = Enum.Font.Gotham,
     TextSize         = 11,
     TextXAlignment   = Enum.TextXAlignment.Left,
-}, Header)
+}, Main)
 
--- Status dot
-local statusDot = New("Frame", {
-    Size             = UDim2.new(0, 9, 0, 9),
-    Position         = UDim2.new(1, -46, 0.5, -4),
-    BackgroundColor3 = CFG.GUI_Green,
-    BorderSizePixel  = 0,
-}, Header)
-Corner(99, statusDot)
-
-New("TextLabel", {
-    Size             = UDim2.new(0, 38, 1, 0),
-    Position         = UDim2.new(1, -86, 0, 0),
-    BackgroundTransparency = 1,
-    Text             = "Online",
-    TextColor3       = CFG.GUI_Green,
-    Font             = Enum.Font.GothamBold,
-    TextSize         = 12,
-    TextXAlignment   = Enum.TextXAlignment.Right,
-}, Header)
-
--- Divider
-New("Frame", {
+-- Linha divisória
+N("Frame", {
     Size             = UDim2.new(1, -28, 0, 1),
-    Position         = UDim2.new(0, 14, 0, 60),
-    BackgroundColor3 = Color3.fromRGB(38, 38, 55),
+    Position         = UDim2.new(0, 14, 0, 62),
+    BackgroundColor3 = Color3.fromRGB(40, 40, 60),
     BorderSizePixel  = 0,
 }, Main)
 
--- Tabs
-local TabBar = New("Frame", {
-    Size             = UDim2.new(1, 0, 0, 38),
-    Position         = UDim2.new(0, 0, 0, 64),
+-- Scroll com os controles
+local Scroll = N("ScrollingFrame", {
+    Size                 = UDim2.new(1, 0, 1, -68),
+    Position             = UDim2.new(0, 0, 0, 68),
     BackgroundTransparency = 1,
+    ScrollBarThickness   = 3,
+    ScrollBarImageColor3 = A1,
+    BorderSizePixel      = 0,
+    CanvasSize           = UDim2.new(0, 0, 0, 0),
+    AutomaticCanvasSize  = Enum.AutomaticSize.Y,
+    ClipsDescendants     = true,
 }, Main)
-Pad(10, 10, 0, 0, TabBar)
-List(6, TabBar)
-New("UIListLayout", {
-    Padding          = UDim.new(0, 6),
-    FillDirection    = Enum.FillDirection.Horizontal,
-    SortOrder        = Enum.SortOrder.LayoutOrder,
-}, TabBar)
+N("UIPadding",    {PaddingLeft=UDim.new(0,12), PaddingRight=UDim.new(0,12), PaddingTop=UDim.new(0,8), PaddingBottom=UDim.new(0,10)}, Scroll)
+N("UIListLayout", {Padding=UDim.new(0,8), SortOrder=Enum.SortOrder.LayoutOrder}, Scroll)
 
-local tabPages = {}
-local tabBtns  = {}
-local activeTab = nil
-
-local function MakeTab(name, emoji, order)
-    local btn = New("TextButton", {
-        Size             = UDim2.new(0, 90, 0, 30),
-        BackgroundColor3 = CFG.GUI_Card,
-        Text             = emoji .. " " .. name,
-        TextColor3       = CFG.GUI_Sub,
-        Font             = Enum.Font.GothamBold,
-        TextSize         = 12,
-        BorderSizePixel  = 0,
-        LayoutOrder      = order,
-    }, TabBar)
-    Corner(7, btn)
-
-    local page = New("ScrollingFrame", {
-        Size             = UDim2.new(1, 0, 1, -108),
-        Position         = UDim2.new(0, 0, 0, 104),
-        BackgroundTransparency = 1,
-        ScrollBarThickness = 2,
-        ScrollBarImageColor3 = CFG.GUI_AccentA,
-        BorderSizePixel  = 0,
-        Visible          = false,
-        CanvasSize       = UDim2.new(0, 0, 0, 0),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-    }, Main)
-    Pad(12, 12, 6, 10, page)
-    List(8, page)
-
-    tabPages[name] = page
-    tabBtns[name]  = btn
-    return page
-end
-
-local function SelectTab(name)
-    for n, p in pairs(tabPages) do
-        p.Visible = (n == name)
-        local b = tabBtns[n]
-        TweenService:Create(b, TweenInfo.new(0.18), {
-            BackgroundColor3 = n == name and CFG.GUI_AccentA or CFG.GUI_Card,
-            TextColor3       = n == name and Color3.new(1,1,1) or CFG.GUI_Sub,
-        }):Play()
-    end
-    activeTab = name
-end
-
-local pgMain  = MakeTab("Main",    "🍕", 1)
-local pgAim   = MakeTab("Aimbot",  "🎯", 2)
-local pgExtra = MakeTab("Config",  "⚙",  3)
-
-for name, btn in pairs(tabBtns) do
-    btn.MouseButton1Click:Connect(function() SelectTab(name) end)
-end
-SelectTab("Main")
-
--- ── Componentes reutilizáveis ──────────────────────────────────
-
-local function SectionLabel(txt, parent, order)
-    local f = New("Frame", {
-        Size             = UDim2.new(1, 0, 0, 24),
+-- ── helpers de componentes ──
+local function SecLabel(txt, order)
+    local f = N("Frame", {
+        Size             = UDim2.new(1, 0, 0, 26),
         BackgroundTransparency = 1,
         LayoutOrder      = order,
-    }, parent)
-    New("TextLabel", {
+    }, Scroll)
+    N("TextLabel", {
         Size             = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
         Text             = txt,
-        TextColor3       = CFG.GUI_AccentA,
+        TextColor3       = A1,
         Font             = Enum.Font.GothamBold,
         TextSize         = 11,
         TextXAlignment   = Enum.TextXAlignment.Left,
     }, f)
-    New("Frame", {
+    N("Frame", {
         Size             = UDim2.new(1, 0, 0, 1),
-        Position         = UDim2.new(0, 0, 1, -1),
-        BackgroundColor3 = CFG.GUI_AccentA,
-        BackgroundTransparency = 0.7,
+        Position         = UDim2.new(0, 0, 1, 0),
+        BackgroundColor3 = A1,
+        BackgroundTransparency = 0.65,
         BorderSizePixel  = 0,
     }, f)
-    return f
 end
 
-local function MakeToggle(parent, label, initVal, onChange, order)
-    local row = New("Frame", {
+local function MakeToggle(label, initVal, onChange, order)
+    local row = N("Frame", {
         Size             = UDim2.new(1, 0, 0, 44),
-        BackgroundColor3 = CFG.GUI_Card,
+        BackgroundColor3 = CAR,
         BorderSizePixel  = 0,
         LayoutOrder      = order,
-    }, parent)
-    Corner(8, row)
+    }, Scroll)
+    N("UICorner", {CornerRadius = UDim.new(0, 8)}, row)
 
-    New("TextLabel", {
-        Size             = UDim2.new(1, -62, 1, 0),
+    N("TextLabel", {
+        Size             = UDim2.new(1, -60, 1, 0),
         Position         = UDim2.new(0, 12, 0, 0),
         BackgroundTransparency = 1,
         Text             = label,
-        TextColor3       = CFG.GUI_Text,
+        TextColor3       = TXT,
         Font             = Enum.Font.Gotham,
         TextSize         = 13,
         TextXAlignment   = Enum.TextXAlignment.Left,
     }, row)
 
-    local pill = New("Frame", {
+    local pill = N("Frame", {
         Size             = UDim2.new(0, 42, 0, 22),
-        Position         = UDim2.new(1, -52, 0.5, -11),
-        BackgroundColor3 = initVal and CFG.GUI_AccentA or CFG.GUI_Toggle,
+        Position         = UDim2.new(1, -50, 0.5, -11),
+        BackgroundColor3 = initVal and A1 or TOG,
         BorderSizePixel  = 0,
     }, row)
-    Corner(99, pill)
+    N("UICorner", {CornerRadius = UDim.new(1, 0)}, pill)
 
-    local knob = New("Frame", {
+    local knob = N("Frame", {
         Size             = UDim2.new(0, 17, 0, 17),
         Position         = initVal and UDim2.new(1,-20,0.5,-8) or UDim2.new(0,3,0.5,-8),
         BackgroundColor3 = Color3.new(1,1,1),
         BorderSizePixel  = 0,
     }, pill)
-    Corner(99, knob)
+    N("UICorner", {CornerRadius = UDim.new(1, 0)}, knob)
 
-    local active = initVal
-    local ti     = TweenInfo.new(0.18, Enum.EasingStyle.Quad)
-
-    local btn = New("TextButton", {
+    local val = initVal
+    local btn = N("TextButton", {
         Size             = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
         Text             = "",
         ZIndex           = 5,
     }, row)
-    btn.MouseButton1Click:Connect(function()
-        active = not active
-        TweenService:Create(pill, ti, {BackgroundColor3 = active and CFG.GUI_AccentA or CFG.GUI_Toggle}):Play()
-        TweenService:Create(knob, ti, {Position = active and UDim2.new(1,-20,0.5,-8) or UDim2.new(0,3,0.5,-8)}):Play()
-        onChange(active)
-    end)
-    -- Retorna setter externo
-    return function(v)
-        active = v
-        TweenService:Create(pill, ti, {BackgroundColor3 = active and CFG.GUI_AccentA or CFG.GUI_Toggle}):Play()
-        TweenService:Create(knob, ti, {Position = active and UDim2.new(1,-20,0.5,-8) or UDim2.new(0,3,0.5,-8)}):Play()
+
+    local function SetState(v)
+        val = v
+        TweenService:Create(pill, TI, {BackgroundColor3 = v and A1 or TOG}):Play()
+        TweenService:Create(knob, TI, {Position = v and UDim2.new(1,-20,0.5,-8) or UDim2.new(0,3,0.5,-8)}):Play()
     end
+
+    btn.MouseButton1Click:Connect(function()
+        SetState(not val)
+        onChange(val)
+    end)
+
+    return SetState
 end
 
-local function MakeSlider(parent, label, min, max, cur, fmt, onChange, order)
-    local card = New("Frame", {
-        Size             = UDim2.new(1, 0, 0, 58),
-        BackgroundColor3 = CFG.GUI_Card,
+local function MakeSlider(label, min, max, cur, decimals, onChange, order)
+    local card = N("Frame", {
+        Size             = UDim2.new(1, 0, 0, 60),
+        BackgroundColor3 = CAR,
         BorderSizePixel  = 0,
         LayoutOrder      = order,
-    }, parent)
-    Corner(8, card)
+    }, Scroll)
+    N("UICorner", {CornerRadius = UDim.new(0, 8)}, card)
 
-    New("TextLabel", {
+    N("TextLabel", {
         Size             = UDim2.new(1, -70, 0, 22),
         Position         = UDim2.new(0, 12, 0, 6),
         BackgroundTransparency = 1,
         Text             = label,
-        TextColor3       = CFG.GUI_Text,
+        TextColor3       = TXT,
         Font             = Enum.Font.Gotham,
-        TextSize          = 13,
+        TextSize         = 13,
         TextXAlignment   = Enum.TextXAlignment.Left,
     }, card)
 
-    local valLbl = New("TextLabel", {
-        Size             = UDim2.new(0, 60, 0, 22),
-        Position         = UDim2.new(1, -70, 0, 6),
+    local fmt   = "%." .. decimals .. "f"
+    local vLbl  = N("TextLabel", {
+        Size             = UDim2.new(0, 58, 0, 22),
+        Position         = UDim2.new(1, -66, 0, 6),
         BackgroundTransparency = 1,
         Text             = string.format(fmt, cur),
-        TextColor3       = CFG.GUI_AccentA,
+        TextColor3       = A1,
         Font             = Enum.Font.GothamBold,
         TextSize         = 13,
         TextXAlignment   = Enum.TextXAlignment.Right,
     }, card)
 
-    local track = New("Frame", {
-        Size             = UDim2.new(1, -24, 0, 4),
-        Position         = UDim2.new(0, 12, 0, 38),
-        BackgroundColor3 = CFG.GUI_Toggle,
+    local track = N("Frame", {
+        Size             = UDim2.new(1, -24, 0, 5),
+        Position         = UDim2.new(0, 12, 0, 40),
+        BackgroundColor3 = TOG,
         BorderSizePixel  = 0,
     }, card)
-    Corner(99, track)
+    N("UICorner", {CornerRadius = UDim.new(1, 0)}, track)
 
-    local t0    = (cur - min) / (max - min)
-    local fill  = New("Frame", {
+    local t0   = (cur - min) / (max - min)
+    local fill = N("Frame", {
         Size             = UDim2.new(t0, 0, 1, 0),
-        BackgroundColor3 = CFG.GUI_AccentA,
+        BackgroundColor3 = A1,
         BorderSizePixel  = 0,
     }, track)
-    Corner(99, fill)
+    N("UICorner", {CornerRadius = UDim.new(1, 0)}, fill)
+
+    -- Thumb
+    local thumb = N("Frame", {
+        Size             = UDim2.new(0, 14, 0, 14),
+        Position         = UDim2.new(t0, -7, 0.5, -7),
+        BackgroundColor3 = Color3.new(1,1,1),
+        BorderSizePixel  = 0,
+        ZIndex           = 3,
+    }, track)
+    N("UICorner", {CornerRadius = UDim.new(1, 0)}, thumb)
 
     local dragging = false
+    local function UpdateSlider(x)
+        local ax = track.AbsolutePosition.X
+        local aw = track.AbsoluteSize.X
+        local t  = math.clamp((x - ax) / aw, 0, 1)
+        local v  = min + t * (max - min)
+        if decimals == 0 then v = math.floor(v + 0.5) end
+        fill.Size      = UDim2.new(t, 0, 1, 0)
+        thumb.Position = UDim2.new(t, -7, 0.5, -7)
+        vLbl.Text      = string.format(fmt, v)
+        onChange(v)
+    end
+
     track.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            UpdateSlider(i.Position.X)
+        end
     end)
     UserInputService.InputEnded:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
     end)
     UserInputService.InputChanged:Connect(function(i)
         if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
-            local ax = track.AbsolutePosition.X
-            local aw = track.AbsoluteSize.X
-            local t  = clamp((i.Position.X - ax) / aw, 0, 1)
-            local v  = min + t * (max - min)
-            -- arredonda baseado no tipo
-            if fmt:find("d") then v = floor(v + 0.5) end
-            fill.Size    = UDim2.new(t, 0, 1, 0)
-            valLbl.Text  = string.format(fmt, v)
-            onChange(v)
+            UpdateSlider(i.Position.X)
         end
     end)
 end
 
-local function MakeInfoCard(parent, order)
-    local card = New("Frame", {
-        Size             = UDim2.new(1, 0, 0, 56),
-        BackgroundColor3 = CFG.GUI_Card,
+-- ── Info card do alvo ──
+local function MakeInfoCard(order)
+    local card = N("Frame", {
+        Size             = UDim2.new(1, 0, 0, 52),
+        BackgroundColor3 = CAR,
         BorderSizePixel  = 0,
         LayoutOrder      = order,
-    }, parent)
-    Corner(8, card)
-    Stroke(CFG.GUI_AccentA, 0.8, card)
-    New("UIStroke", {Color=CFG.GUI_AccentA, Thickness=0.8, Transparency=0.5}, card)
+    }, Scroll)
+    N("UICorner", {CornerRadius = UDim.new(0, 8)}, card)
+    N("UIStroke", {Color = A1, Thickness = 0.8, Transparency = 0.4}, card)
 
-    New("TextLabel", {
+    N("TextLabel", {
         Size             = UDim2.new(0, 80, 0, 18),
-        Position         = UDim2.new(0, 12, 0, 8),
+        Position         = UDim2.new(0, 12, 0, 7),
         BackgroundTransparency = 1,
-        Text             = "🎯 ALVO",
-        TextColor3       = CFG.GUI_AccentA,
+        Text             = "🎯 ALVO ATUAL",
+        TextColor3       = A1,
         Font             = Enum.Font.GothamBold,
         TextSize         = 11,
     }, card)
 
-    local nameLbl = New("TextLabel", {
+    local nLbl = N("TextLabel", {
         Size             = UDim2.new(1, -20, 0, 18),
-        Position         = UDim2.new(0, 12, 0, 26),
+        Position         = UDim2.new(0, 12, 0, 28),
         BackgroundTransparency = 1,
-        Text             = "— Nenhum alvo —",
-        TextColor3       = CFG.GUI_Sub,
+        Text             = "nenhum",
+        TextColor3       = SUB,
         Font             = Enum.Font.Gotham,
         TextSize         = 13,
         TextXAlignment   = Enum.TextXAlignment.Left,
     }, card)
 
-    local distLbl = New("TextLabel", {
-        Size             = UDim2.new(0, 90, 0, 18),
-        Position         = UDim2.new(1, -100, 0, 8),
+    local dLbl = N("TextLabel", {
+        Size             = UDim2.new(0, 80, 0, 18),
+        Position         = UDim2.new(1, -90, 0, 7),
         BackgroundTransparency = 1,
         Text             = "",
-        TextColor3       = CFG.GUI_Green,
+        TextColor3       = GRN,
         Font             = Enum.Font.GothamBold,
         TextSize         = 12,
         TextXAlignment   = Enum.TextXAlignment.Right,
     }, card)
 
-    return nameLbl, distLbl
+    return nLbl, dLbl
 end
 
--- ══════════════════ PÁGINA MAIN ════════════════════════════════
-SectionLabel("◈  WALLHACK", pgMain, 1)
+-- ══════════════════════════════════════════
+--  MONTA OS CONTROLES
+-- ══════════════════════════════════════════
 
-local setWH = MakeToggle(pgMain, "👁  Highlight (ver através das paredes)", CFG.WH_Enabled, function(v)
-    CFG.WH_Enabled = v
-    RefreshHighlights()
+SecLabel("◈  WALLHACK", 1)
+
+MakeToggle("👁  Highlight (ver pela parede)", CFG.WH_On, function(v)
+    CFG.WH_On = v
+    RefreshAllHighlights()
 end, 2)
 
-MakeToggle(pgMain, "⚔  Team Check (não marcar aliados)", CFG.AB_TeamCheck, function(v)
-    CFG.AB_TeamCheck = v
-    CFG.TB_TeamCheck = v
-    CACHE_DIRTY = true
-end, 3)
+SecLabel("◈  AIMBOT  (segurar SHIFT)", 3)
 
-SectionLabel("◈  AIMBOT", pgMain, 4)
-
-local setAB = MakeToggle(pgMain, "🤖  Aimbot (segurar SHIFT)", CFG.AB_Enabled, function(v)
-    CFG.AB_Enabled = v
-    UpdateFOVCircle()
-    if not v then springVel = V3(0,0,0); lockedTarget = nil end
-end, 5)
-
-local setTB = MakeToggle(pgMain, "🔫  Triggerbot (auto-atirar no alvo)", CFG.TB_Enabled, function(v)
-    CFG.TB_Enabled = v
-end, 6)
-
-SectionLabel("◈  STATUS DO ALVO", pgMain, 7)
-lockedLabel = MakeInfoCard(pgMain, 8) -- retorna nameLbl, distLbl
-local targetNameLbl, targetDistLbl = lockedLabel, nil
-
--- (recria para capturar os dois retornos corretamente)
-do
-    -- remove o anterior
-    for _, c in ipairs(pgMain:GetChildren()) do
-        if c.LayoutOrder == 8 then c:Destroy() end
-    end
-    targetNameLbl, targetDistLbl = MakeInfoCard(pgMain, 8)
-end
-
--- ══════════════════ PÁGINA AIMBOT ══════════════════════════════
-SectionLabel("◈  MIRA", pgAim, 1)
-
-MakeSlider(pgAim, "FOV do Aimbot (graus)", 10, 360, CFG.AB_FOV, "%d°", function(v)
-    CFG.AB_FOV = v; UpdateFOVCircle()
-end, 2)
-
-MakeSlider(pgAim, "Rigidez (Stiffness)", 1, 30, CFG.AB_Stiffness, "%.0f", function(v)
-    CFG.AB_Stiffness = v
-end, 3)
-
-MakeSlider(pgAim, "Amortecimento (Damping)", 1, 20, CFG.AB_Damping, "%.0f", function(v)
-    CFG.AB_Damping = v
+MakeToggle("🤖  Aimbot ligado", CFG.AB_On, function(v)
+    CFG.AB_On = v
+    fovCircle.Visible = v
 end, 4)
 
-MakeSlider(pgAim, "Predição de movimento (s)", 0, 0.5, CFG.AB_Predict, "%.2fs", function(v)
-    CFG.AB_Predict = v
+MakeSlider("Suavidade (0=rápido, 1=lento)", 0, 0.99, CFG.AB_Smooth, 2, function(v)
+    CFG.AB_Smooth = v
 end, 5)
 
-MakeSlider(pgAim, "Delay Triggerbot (s)", 0.02, 0.5, CFG.TB_Delay, "%.2fs", function(v)
-    CFG.TB_Delay = v
+MakeSlider("FOV (pixels do centro)", 20, 500, CFG.AB_FOV, 0, function(v)
+    CFG.AB_FOV = v
 end, 6)
 
-MakeSlider(pgAim, "Threshold Triggerbot (px)", 5, 80, CFG.TB_Threshold, "%dpx", function(v)
-    CFG.TB_Threshold = v
-end, 7)
+SecLabel("◈  TRIGGERBOT", 7)
 
-SectionLabel("◈  VISUALIZAÇÃO", pgAim, 8)
+MakeToggle("🔫  Triggerbot ligado", CFG.TB_On, function(v)
+    CFG.TB_On = v
+end, 8)
 
-MakeToggle(pgAim, "⭕  Mostrar círculo de FOV", CFG.AB_ShowFOV, function(v)
-    CFG.AB_ShowFOV = v; UpdateFOVCircle()
+MakeSlider("Threshold (pixels)", 5, 100, CFG.TB_Px, 0, function(v)
+    CFG.TB_Px = v
 end, 9)
 
-MakeToggle(pgAim, "📍  Linha para alvo travado", true, function(v)
-    lockLine.Visible = v and (lockedTarget ~= nil)
+MakeSlider("Delay entre tiros (s)", 0.02, 0.5, CFG.TB_Delay, 2, function(v)
+    CFG.TB_Delay = v
 end, 10)
 
--- ══════════════════ PÁGINA CONFIG ══════════════════════════════
-SectionLabel("◈  CHECAGENS", pgExtra, 1)
+SecLabel("◈  CONFIGURAÇÕES", 11)
 
-MakeToggle(pgExtra, "❤  Health Check (não mirar em mortos)", CFG.AB_HealthCheck, function(v)
+MakeToggle("⚔  Team Check (não mirar aliados)", CFG.AB_TeamCheck, function(v)
+    CFG.AB_TeamCheck = v
+    CFG.TB_TeamCheck = v
+    RefreshAllHighlights()
+end, 12)
+
+MakeToggle("❤  Health Check (não mirar mortos)", CFG.AB_HealthCheck, function(v)
     CFG.AB_HealthCheck = v
-end, 2)
+end, 13)
 
-MakeToggle(pgExtra, "🔍  Visibility Check (WorldToViewport)", CFG.AB_VisCheck, function(v)
-    CFG.AB_VisCheck = v
-end, 3)
+SecLabel("◈  STATUS", 14)
+local targetName, targetDist = MakeInfoCard(15)
 
-SectionLabel("◈  MIRA EM", pgExtra, 4)
-
-local headBtn = New("TextButton", {
-    Size             = UDim2.new(0.5, -5, 0, 36),
-    BackgroundColor3 = CFG.AB_AimPart == "Head" and CFG.GUI_AccentA or CFG.GUI_Card,
-    Text             = "🗡 Cabeça",
-    TextColor3       = Color3.new(1,1,1),
-    Font             = Enum.Font.GothamBold,
-    TextSize         = 13,
-    BorderSizePixel  = 0,
-    LayoutOrder      = 5,
-}, pgExtra)
-Corner(8, headBtn)
-
-local bodyBtn = New("TextButton", {
-    Size             = UDim2.new(0.5, -5, 0, 36),
-    BackgroundColor3 = CFG.AB_AimPart ~= "Head" and CFG.GUI_AccentA or CFG.GUI_Card,
-    Text             = "🛡 Tronco",
-    TextColor3       = Color3.new(1,1,1),
-    Font             = Enum.Font.GothamBold,
-    TextSize         = 13,
-    BorderSizePixel  = 0,
-    LayoutOrder      = 6,
-}, pgExtra)
-Corner(8, bodyBtn)
-
-local hrz = New("Frame", {
-    Size             = UDim2.new(1, 0, 0, 36),
-    BackgroundTransparency = 1,
-    LayoutOrder      = 5,
-}, pgExtra)
-New("UIListLayout", {
-    FillDirection = Enum.FillDirection.Horizontal,
-    Padding       = UDim.new(0, 8),
-}, hrz)
-headBtn.Parent = hrz
-bodyBtn.Parent = hrz
-
-local ti18 = TweenInfo.new(0.18)
-headBtn.MouseButton1Click:Connect(function()
-    CFG.AB_AimPart = "Head"
-    TweenService:Create(headBtn, ti18, {BackgroundColor3 = CFG.GUI_AccentA}):Play()
-    TweenService:Create(bodyBtn, ti18, {BackgroundColor3 = CFG.GUI_Card}):Play()
-end)
-bodyBtn.MouseButton1Click:Connect(function()
-    CFG.AB_AimPart = "HumanoidRootPart"
-    TweenService:Create(bodyBtn, ti18, {BackgroundColor3 = CFG.GUI_AccentA}):Play()
-    TweenService:Create(headBtn, ti18, {BackgroundColor3 = CFG.GUI_Card}):Play()
-end)
-
-SectionLabel("◈  CORES DO WALLHACK", pgExtra, 7)
-
--- Info cores
-New("TextLabel", {
-    Size             = UDim2.new(1, 0, 0, 36),
-    BackgroundTransparency = 1,
-    Text             = "Inimigos: Vermelho  |  Aliados: Verde\n(configurável no topo do script)",
-    TextColor3       = CFG.GUI_Sub,
-    Font             = Enum.Font.Gotham,
-    TextSize         = 12,
-    TextXAlignment   = Enum.TextXAlignment.Left,
-    TextWrapped      = true,
-    LayoutOrder      = 8,
-}, pgExtra)
-
--- ══════════════════════════════════════════════════════════════
---  EVENTOS DE PLAYER
--- ══════════════════════════════════════════════════════════════
-local function OnCharAdded(p, char)
-    task.wait(0.3)   -- espera partes carregarem
-    CACHE_DIRTY = true
-    -- Aplica highlight após spawn
-    char.ChildAdded:Connect(function()
-        CACHE_DIRTY = true
-    end)
-end
-
-Players.PlayerAdded:Connect(function(p)
-    CACHE_DIRTY = true
-    p.CharacterAdded:Connect(function(c) OnCharAdded(p, c) end)
-    if p.Character then OnCharAdded(p, p.Character) end
-end)
-
-Players.PlayerRemoving:Connect(function(p)
-    RemoveHighlight(charCache[p])
-    charCache[p] = nil
-end)
-
-for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= LP then
-        CACHE_DIRTY = true
-        p.CharacterAdded:Connect(function(c) OnCharAdded(p, c) end)
-        if p.Character then OnCharAdded(p, p.Character) end
-    end
-end
-
--- ══════════════════════════════════════════════════════════════
---  ATALHOS DE TECLADO
--- ══════════════════════════════════════════════════════════════
-local aimHeld = false
-
+-- ══════════════════════════════════════════
+--  INPUTS
+-- ══════════════════════════════════════════
 UserInputService.InputBegan:Connect(function(i, gp)
     if gp then return end
     if i.KeyCode == Enum.KeyCode.F1 then
         Main.Visible = not Main.Visible
-    elseif i.KeyCode == Enum.KeyCode.F2 then
-        CFG.AB_Enabled = not CFG.AB_Enabled
-        setAB(CFG.AB_Enabled)
-        UpdateFOVCircle()
-    elseif i.KeyCode == CFG.AB_Key then
-        aimHeld = true
+    elseif i.KeyCode == Enum.KeyCode.LeftShift or i.KeyCode == Enum.KeyCode.RightShift then
+        aiming = true
     end
 end)
 UserInputService.InputEnded:Connect(function(i)
-    if i.KeyCode == CFG.AB_Key then
-        aimHeld = false
-        springVel = V3(0, 0, 0)
+    if i.KeyCode == Enum.KeyCode.LeftShift or i.KeyCode == Enum.KeyCode.RightShift then
+        aiming = false
     end
 end)
 
--- ══════════════════════════════════════════════════════════════
---  LOOP PRINCIPAL — otimizado por tick alternado
--- ══════════════════════════════════════════════════════════════
-local frameCount   = 0
-local CACHE_EVERY  = 12    -- reconstrói cache a cada N frames (~5x/s a 60fps)
-local WH_EVERY     = 20    -- atualiza highlights a cada N frames
-local GUI_EVERY    = 15    -- atualiza info de alvo na GUI
+-- ══════════════════════════════════════════
+--  LOOP PRINCIPAL
+-- ══════════════════════════════════════════
+local tick = 0
 
 RunService.RenderStepped:Connect(function(dt)
-    frameCount = frameCount + 1
-
-    -- Rebuild cache (barato, mas não a cada frame)
-    if CACHE_DIRTY or frameCount % CACHE_EVERY == 0 then
-        RebuildCache()
-        -- Aplica highlights em novos personagens
-        for _, data in pairs(charCache) do
-            if data.highlight == nil or not data.highlight.Parent then
-                ApplyHighlight(data)
-            end
-        end
-    end
-
-    -- Wallhack: atualiza Enabled (toggle) periodicamente
-    if frameCount % WH_EVERY == 0 then
-        for _, data in pairs(charCache) do
-            if data.highlight then
-                data.highlight.Enabled = CFG.WH_Enabled
-            end
-        end
-    end
+    tick = tick + 1
 
     -- Aimbot
-    if CFG.AB_Enabled and aimHeld then
-        if frameCount % 2 == 0 then   -- roda a cada 2 frames (30fps) — suficiente
-            lockedTarget = GetBestTarget()
-        end
-        if lockedTarget then
-            SpringStep(dt, lockedTarget)
-        end
-    else
-        lockedTarget = nil
-    end
-
-    -- FOV circle
-    UpdateFOVCircle()
-
-    -- Lock indicator
-    UpdateLockIndicator(lockedTarget)
+    AimbotStep()
 
     -- Triggerbot
-    TriggerTick(dt)
+    TriggerbotStep(dt)
 
-    -- Atualiza GUI de alvo
-    if frameCount % GUI_EVERY == 0 then
-        if lockedTarget and lockedTarget.char and lockedTarget.char.Parent then
-            local dist = floor(GetDistance and
-                (lockedTarget.root.Position - (LP.Character and
-                LP.Character:FindFirstChild("HumanoidRootPart") and
-                LP.Character.HumanoidRootPart.Position or V3())) .Magnitude or 0)
-            targetNameLbl.Text  = "👤 " .. lockedTarget.player.DisplayName
-            targetNameLbl.TextColor3 = CFG.GUI_Text
-            targetDistLbl.Text  = dist .. " st"
+    -- FOV circle
+    if CFG.AB_On then
+        local vp = Camera.ViewportSize
+        fovCircle.Visible  = true
+        fovCircle.Position = Vector2.new(vp.X * 0.5, vp.Y * 0.5)
+        fovCircle.Radius   = CFG.AB_FOV
+    else
+        fovCircle.Visible = false
+    end
+
+    -- Atualiza info do alvo (a cada 10 frames)
+    if tick % 10 == 0 then
+        local part = GetTarget()
+        if part then
+            local p = Players:GetPlayerFromCharacter(part.Parent)
+            if p then
+                local myRoot = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                local dist   = myRoot and math.floor((myRoot.Position - part.Position).Magnitude) or 0
+                targetName.Text      = "👤 " .. p.DisplayName
+                targetName.TextColor3= TXT
+                targetDist.Text      = dist .. " st"
+            end
         else
-            targetNameLbl.Text  = "— Nenhum alvo —"
-            targetNameLbl.TextColor3 = CFG.GUI_Sub
-            targetDistLbl.Text  = ""
+            targetName.Text       = "nenhum"
+            targetName.TextColor3 = SUB
+            targetDist.Text       = ""
         end
     end
 end)
 
--- ══════════════════════════════════════════════════════════════
-print("🍕 Pizza Hub carregado! F1 = GUI  |  F2 = Aimbot  |  SHIFT = Mirar")
+print("🍕 Pizza Hub v3 carregado! F1 = GUI | SHIFT = Aimbot")
