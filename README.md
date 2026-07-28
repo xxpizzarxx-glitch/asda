@@ -1,13 +1,14 @@
 -- ╔══════════════════════════════════════════╗
--- ║         🍕 PIZZA HUB v3.0               ║
--- ║  Wallhack · Aimbot · Triggerbot          ║
--- ║  F1 = abrir/fechar                       ║
+-- ║     🍕 PIZZA HUB v3.5 (COM ESP)        ║
+-- ║  Wallhack · Aimbot · Triggerbot · ESP   ║
+-- ║  F1 = abrir/fechar  SHIFT = mirar       ║
 -- ╚══════════════════════════════════════════╝
 
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService     = game:GetService("TweenService")
+local HttpService      = game:GetService("HttpService") -- para JSON no ESP (opcional)
 
 local LP     = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
@@ -30,6 +31,11 @@ local CFG = {
     TB_On         = false,
     TB_Px         = 20,    -- pixels do centro pra atirar
     TB_Delay      = 0.12,
+
+    ESP_On        = true,
+    ESP_ShowName  = true,
+    ESP_ShowHP    = true,
+    ESP_ShowDist  = true,
 }
 
 -- ══════════════════════════════════════════
@@ -98,6 +104,140 @@ end)
 
 Players.PlayerRemoving:Connect(function(p)
     RemoveHighlight(p)
+end)
+
+-- ══════════════════════════════════════════
+--  ESP  (nome, HP, distância)
+-- ══════════════════════════════════════════
+local espBinds = {}   -- [player] = {billboard, nameLabel, hpLabel, distLabel}
+
+local function CreateESP(p)
+    if p == LP then return end
+    local char = p.Character
+    if not char then return end
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+
+    local bill = Instance.new("BillboardGui")
+    bill.Name           = "ESP"
+    bill.Size           = UDim2.new(0, 200, 0, 60)
+    bill.StudsOffset    = Vector3.new(0, 2.5, 0)
+    bill.AlwaysOnTop    = true
+    bill.MaxDistance    = 500
+    bill.Adornee        = head
+    bill.Parent         = char
+
+    local nameLbl = Instance.new("TextLabel")
+    nameLbl.Size                = UDim2.new(1, 0, 0, 18)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.TextColor3          = Color3.fromRGB(255, 255, 255)
+    nameLbl.Font                = Enum.Font.GothamBold
+    nameLbl.TextSize            = 13
+    nameLbl.TextStrokeTransparency = 0.6
+    nameLbl.Text                = CFG.ESP_ShowName and p.DisplayName or ""
+    nameLbl.Parent              = bill
+
+    local hpLbl = Instance.new("TextLabel")
+    hpLbl.Size                  = UDim2.new(1, 0, 0, 18)
+    hpLbl.Position              = UDim2.new(0, 0, 0, 20)
+    hpLbl.BackgroundTransparency = 1
+    hpLbl.TextColor3            = Color3.fromRGB(255, 100, 100)
+    hpLbl.Font                  = Enum.Font.Gotham
+    hpLbl.TextSize              = 12
+    hpLbl.TextStrokeTransparency = 0.6
+    hpLbl.Text                  = ""
+    hpLbl.Parent                = bill
+
+    local distLbl = Instance.new("TextLabel")
+    distLbl.Size                = UDim2.new(1, 0, 0, 18)
+    distLbl.Position            = UDim2.new(0, 0, 0, 40)
+    distLbl.BackgroundTransparency = 1
+    distLbl.TextColor3          = Color3.fromRGB(200, 200, 200)
+    distLbl.Font                = Enum.Font.Gotham
+    distLbl.TextSize            = 11
+    distLbl.TextStrokeTransparency = 0.6
+    distLbl.Text                = ""
+    distLbl.Parent              = bill
+
+    espBinds[p] = {billboard = bill, nameLabel = nameLbl, hpLabel = hpLbl, distLabel = distLbl}
+end
+
+local function RemoveESP(p)
+    if espBinds[p] then
+        espBinds[p].billboard:Destroy()
+        espBinds[p] = nil
+    end
+end
+
+local function RefreshESP()
+    if not CFG.ESP_On then
+        for p, data in pairs(espBinds) do
+            data.billboard.Enabled = false
+        end
+        return
+    end
+    local myRoot = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    for p, data in pairs(espBinds) do
+        local char = p.Character
+        if not char then
+            data.billboard.Enabled = false
+            continue
+        end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        data.billboard.Enabled = true
+
+        -- nome
+        data.nameLabel.Text = CFG.ESP_ShowName and p.DisplayName or ""
+
+        -- HP
+        if CFG.ESP_ShowHP and hum then
+            local hp = math.floor(hum.Health)
+            data.hpLabel.Text = "HP: " .. hp
+            if hp > 60 then
+                data.hpLabel.TextColor3 = Color3.fromRGB(60, 220, 100)
+            elseif hp > 30 then
+                data.hpLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
+            else
+                data.hpLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
+            end
+        else
+            data.hpLabel.Text = ""
+        end
+
+        -- distância
+        if CFG.ESP_ShowDist and myRoot and hrp then
+            local dist = math.floor((myRoot.Position - hrp.Position).Magnitude)
+            data.distLabel.Text = dist .. " st"
+        else
+            data.distLabel.Text = ""
+        end
+    end
+end
+
+-- conecta ESP em todos os players
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LP then
+        CreateESP(p)
+        p.CharacterAdded:Connect(function()
+            task.wait(0.5)
+            RemoveESP(p) -- limpa antigo
+            CreateESP(p)
+        end)
+    end
+end
+
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function()
+        task.wait(0.5)
+        RemoveESP(p)
+        CreateESP(p)
+    end)
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    RemoveHighlight(p)
+    RemoveESP(p)
 end)
 
 -- ══════════════════════════════════════════
@@ -222,7 +362,7 @@ end
 
 -- ── Frame principal ──
 local Main = N("Frame", {
-    Size             = UDim2.new(0, 340, 0, 420),
+    Size             = UDim2.new(0, 340, 0, 440), -- aumentei um pouco
     Position         = UDim2.new(0, 60, 0, 60),
     BackgroundColor3 = BG,
     BorderSizePixel  = 0,
@@ -515,49 +655,56 @@ MakeToggle("👁  Highlight (ver pela parede)", CFG.WH_On, function(v)
     RefreshAllHighlights()
 end, 2)
 
-SecLabel("◈  AIMBOT  (segurar SHIFT)", 3)
+SecLabel("◈  ESP", 3)
+
+MakeToggle("📋  ESP (nome, HP, distância)", CFG.ESP_On, function(v)
+    CFG.ESP_On = v
+    RefreshESP()
+end, 4)
+
+SecLabel("◈  AIMBOT  (segurar SHIFT)", 5)
 
 MakeToggle("🤖  Aimbot ligado", CFG.AB_On, function(v)
     CFG.AB_On = v
     fovCircle.Visible = v
-end, 4)
+end, 6)
 
 MakeSlider("Suavidade (0=rápido, 1=lento)", 0, 0.99, CFG.AB_Smooth, 2, function(v)
     CFG.AB_Smooth = v
-end, 5)
+end, 7)
 
 MakeSlider("FOV (pixels do centro)", 20, 500, CFG.AB_FOV, 0, function(v)
     CFG.AB_FOV = v
-end, 6)
+end, 8)
 
-SecLabel("◈  TRIGGERBOT", 7)
+SecLabel("◈  TRIGGERBOT", 9)
 
 MakeToggle("🔫  Triggerbot ligado", CFG.TB_On, function(v)
     CFG.TB_On = v
-end, 8)
+end, 10)
 
 MakeSlider("Threshold (pixels)", 5, 100, CFG.TB_Px, 0, function(v)
     CFG.TB_Px = v
-end, 9)
+end, 11)
 
 MakeSlider("Delay entre tiros (s)", 0.02, 0.5, CFG.TB_Delay, 2, function(v)
     CFG.TB_Delay = v
-end, 10)
+end, 12)
 
-SecLabel("◈  CONFIGURAÇÕES", 11)
+SecLabel("◈  CONFIGURAÇÕES", 13)
 
 MakeToggle("⚔  Team Check (não mirar aliados)", CFG.AB_TeamCheck, function(v)
     CFG.AB_TeamCheck = v
     CFG.TB_TeamCheck = v
     RefreshAllHighlights()
-end, 12)
+end, 14)
 
 MakeToggle("❤  Health Check (não mirar mortos)", CFG.AB_HealthCheck, function(v)
     CFG.AB_HealthCheck = v
-end, 13)
+end, 15)
 
-SecLabel("◈  STATUS", 14)
-local targetName, targetDist = MakeInfoCard(15)
+SecLabel("◈  STATUS", 16)
+local targetName, targetDist = MakeInfoCard(17)
 
 -- ══════════════════════════════════════════
 --  INPUTS
@@ -600,6 +747,11 @@ RunService.RenderStepped:Connect(function(dt)
         fovCircle.Visible = false
     end
 
+    -- Atualiza ESP
+    if tick % 10 == 0 then
+        RefreshESP()
+    end
+
     -- Atualiza info do alvo (a cada 10 frames)
     if tick % 10 == 0 then
         local part = GetTarget()
@@ -620,4 +772,4 @@ RunService.RenderStepped:Connect(function(dt)
     end
 end)
 
-print("🍕 Pizza Hub v3 carregado! F1 = GUI | SHIFT = Aimbot")
+print("🍕 Pizza Hub v3.5 carregado! F1 = GUI | SHIFT = Aimbot | ESP ativo")
